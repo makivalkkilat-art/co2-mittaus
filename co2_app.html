@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<title>CO2 Mittaus</title>
+
+<!-- PWA manifesti -->
+<link rel="manifest" href="manifest.json">
+
+<!-- Ikoni selaimen välilehteen -->
+<link rel="icon" href="icons/icon-192.png">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111111">
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #111;
+  color: #eee;
+  text-align: center;
+  margin: 0;
+  padding: 20px;
+}
+h1 {
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+.card {
+  background: #222;
+  padding: 15px;
+  margin: 10px auto;
+  width: 300px;
+  border-radius: 10px;
+  font-size: 22px;
+}
+canvas {
+  max-width: 100%;
+}
+</style>
+</head>
+<body>
+
+<h1>CO2 Mittaus</h1>
+
+<div class="card" id="co2Box">CO₂: ... ppm</div>
+<div class="card" id="tempBox">Lämpötila: ... °C</div>
+<div class="card" id="humBox">Kosteus: ... %</div>
+
+<h2>CO₂ graafi (viimeiset 200 mittausta)</h2>
+<canvas id="co2Chart"></canvas>
+
+<script>
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyDUc84SjepRx6tq81Bb3XCdLb3GMl-q8wI",
+  authDomain: "co2-kotimittaus-7358a.firebaseapp.com",
+  databaseURL: "https://co2-kotimittaus-7358a-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "co2-kotimittaus-7358a",
+  storageBucket: "co2-kotimittaus-7358a.firebasestorage.app",
+  messagingSenderId: "383188896076",
+  appId: "1:383188896076:web:dfa5e7d19ddc1174a467e9"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// Chart.js
+const ctx = document.getElementById('co2Chart').getContext('2d');
+let labels = [];
+let dataCO2 = [];
+
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: labels,
+    datasets: [{
+      label: 'CO₂ (ppm)',
+      data: dataCO2,
+      borderWidth: 2,
+      fill: false
+    }]
+  },
+  options: {
+    responsive: true,
+    scales: {
+      x: { display: false },
+      y: { beginAtZero: false }
+    }
+  }
+});
+
+// Reaaliaikainen kuuntelu
+db.ref("sensor").limitToLast(200).on("child_added", (snapshot) => {
+  const d = snapshot.val();
+  if (!d) return;
+
+  document.getElementById("co2Box").innerHTML = "CO₂: " + d.co2 + " ppm";
+  document.getElementById("tempBox").innerHTML = "Lämpötila: " + d.temp + " °C";
+  document.getElementById("humBox").innerHTML = "Kosteus: " + d.hum + " %";
+
+  labels.push("");
+  dataCO2.push(d.co2);
+
+  if (dataCO2.length > 200) {
+    labels.shift();
+    dataCO2.shift();
+  }
+
+  chart.update();
+});
+
+// Rekisteröi service worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('Service worker ok', reg.scope))
+      .catch(err => console.log('Service worker error', err));
+  });
+}
+</script>
+
+</body>
+</html>
