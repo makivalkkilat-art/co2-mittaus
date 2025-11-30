@@ -1,60 +1,127 @@
 <!DOCTYPE html>
 <html lang="fi">
 <head>
-<meta charset="UTF-8">
-<title>CO2 Mittaus</title>
-<!-- PWA manifesti -->
-<link rel="manifest" href="manifest.json">
+  <meta charset="UTF-8" />
+  <title>CO2 Mittaus</title>
 
-<!-- Ikoni selaimen välilehteen -->
-<link rel="icon" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
 
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#111111">
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background: #0b0b0b;
+      color: #eee;
+      font-family: Arial, sans-serif;
+      margin: 0;
+    }
+    nav {
+      background: #161616;
+      padding: 10px;
+      display: flex;
+      justify-content: space-around;
+      border-bottom: 1px solid #333;
+    }
+    nav button {
+      background: #242424;
+      color: #eee;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 15px;
+    }
+    nav button.active {
+      background: #0aa;
+      color: #000;
+    }
 
-<style>
-body {
-  font-family: Arial, sans-serif;
-  background: #111;
-  color: #eee;
-  text-align: center;
-  margin: 0;
-  padding: 20px;
-}
-h1 {
-  margin-top: 10px;
-  margin-bottom: 10px;
-}
-.card {
-  background: #222;
-  padding: 15px;
-  margin: 10px auto;
-  width: 300px;
-  border-radius: 10px;
-  font-size: 22px;
-}
-canvas {
-  max-width: 100%;
-}
-</style>
+    .page {
+      display: none;
+      padding: 16px;
+    }
+    .page.active {
+      display: block;
+    }
+
+    h2 {
+      margin-top: 0;
+      font-weight: normal;
+    }
+
+    .card {
+      background: #181818;
+      padding: 18px;
+      margin-top: 16px;
+      border-radius: 12px;
+      text-align: center;
+      font-size: 22px;
+      box-shadow: 0 0 12px rgba(0,0,0,0.6);
+    }
+    .card small {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      color: #999;
+    }
+
+    .value {
+      font-size: 30px;
+      font-weight: bold;
+    }
+
+    .good { color: #00ff88; }
+    .mid  { color: #ffdd00; }
+    .bad  { color: #ff6666; }
+    .verybad { color: #ff2222; }
+
+    canvas {
+      margin-top: 16px;
+      max-width: 100%;
+      background: #111;
+      border-radius: 10px;
+      box-shadow: 0 0 12px rgba(0,0,0,0.6);
+    }
+
+    .legend {
+      font-size: 12px;
+      color: #bbb;
+      margin-top: 6px;
+    }
+  </style>
 </head>
+
 <body>
 
-<h1>CO2 Mittaus</h1>
+<nav>
+  <button id="liveBtn" class="active">Live</button>
+  <button id="historyBtn">24h historia</button>
+</nav>
 
-<div class="card" id="co2Box">CO₂: ... ppm</div>
-<div class="card" id="tempBox">Lämpötila: ... °C</div>
-<div class="card" id="humBox">Kosteus: ... %</div>
+<!-- LIVE DATA -->
+<div id="livePage" class="page active">
+  <h2>Reaaliaikainen CO₂</h2>
+  <div id="liveCard" class="card">
+    <div>Odotetaan dataa...</div>
+  </div>
+</div>
 
-<h2>CO₂ graafi (viimeiset 200 mittausta)</h2>
-<canvas id="co2Chart"></canvas>
+<!-- HISTORY PAGE -->
+<div id="historyPage" class="page">
+  <h2>24h historia</h2>
+  <canvas id="historyChart"></canvas>
+  <div class="legend">
+    CO₂ = turkoosi, lämpötila = oranssi, kosteus = sininen.
+  </div>
+</div>
 
 <script>
+// ---------------------
 // Firebase config
+// ---------------------
 const firebaseConfig = {
   apiKey: "AIzaSyDUc84SjepRx6tq81Bb3XCdLb3GMl-q8wI",
   authDomain: "co2-kotimittaus-7358a.firebaseapp.com",
@@ -68,61 +135,199 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// Chart.js
-const ctx = document.getElementById('co2Chart').getContext('2d');
-let labels = [];
-let dataCO2 = [];
+// ---------------------
+// Apufunktiot päivämäärälle
+// ---------------------
+function pad(n) {
+  return n < 10 ? "0" + n : "" + n;
+}
 
-const chart = new Chart(ctx, {
-  type: 'line',
-  data: {
-    labels: labels,
-    datasets: [{
-      label: 'CO₂ (ppm)',
-      data: dataCO2,
-      borderWidth: 2,
-      fill: false
-    }]
-  },
-  options: {
-    responsive: true,
-    scales: {
-      x: { display: false },
-      y: { beginAtZero: false }
+function getDayKey(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  return `${y}-${m}-${day}`; // esim. 2025-01-13
+}
+
+// ---------------------
+// NAVIGATION
+// ---------------------
+const liveBtn = document.getElementById("liveBtn");
+const historyBtn = document.getElementById("historyBtn");
+const livePage = document.getElementById("livePage");
+const historyPage = document.getElementById("historyPage");
+
+liveBtn.onclick = () => {
+  liveBtn.classList.add("active");
+  historyBtn.classList.remove("active");
+  livePage.classList.add("active");
+  historyPage.classList.remove("active");
+};
+
+historyBtn.onclick = () => {
+  historyBtn.classList.add("active");
+  liveBtn.classList.remove("active");
+  historyPage.classList.add("active");
+  livePage.classList.remove("active");
+  loadHistory();
+};
+
+// ---------------------
+// LIVE DATA (vain tämän päivän kansiosta)
+// ---------------------
+const liveCard = document.getElementById("liveCard");
+
+function subscribeLive() {
+  const todayKey = getDayKey(0);
+  const ref = db.ref("sensor/" + todayKey);
+
+  ref.limitToLast(1).on("value", snap => {
+    let last = null;
+    snap.forEach(ch => { last = ch.val(); });
+    if (!last) {
+      liveCard.innerHTML = "Ei dataa tälle päivälle.";
+      return;
     }
+
+    const co2 = last.co2 || 0;
+    const temp = last.temp;
+    const hum = last.hum;
+    const ts = last.timestamp ? new Date(last.timestamp * 1000) : null;
+
+    let cls = "good";
+    if (co2 > 800) cls = "mid";
+    if (co2 > 1200) cls = "bad";
+    if (co2 > 2000) cls = "verybad";
+
+    const timeStr = ts ? ts.toLocaleTimeString("fi-FI") : "-";
+
+    liveCard.innerHTML = `
+      <div>CO₂</div>
+      <div class="value ${cls}">${co2} ppm</div>
+      <div>Lämpö: ${temp} °C</div>
+      <div>Kosteus: ${hum} %</div>
+      <small>Päivä: ${todayKey}, viimeisin mittaus: ${timeStr}</small>
+    `;
+  });
+}
+
+// Käynnistä live-kuuntelu
+subscribeLive();
+
+// ---------------------
+// 24h HISTORY GRAPH
+// ---------------------
+let historyChart = null;
+
+function loadHistory() {
+  const nowMs = Date.now();
+  const cutoffMs = nowMs - 24 * 60 * 60 * 1000;
+
+  const todayKey = getDayKey(0);
+  const yesterdayKey = getDayKey(-1);
+
+  const dayKeys = [yesterdayKey, todayKey];
+
+  let points = [];
+  let pending = dayKeys.length;
+
+  dayKeys.forEach(dayKey => {
+    db.ref("sensor/" + dayKey).once("value", snap => {
+      snap.forEach(ch => {
+        const d = ch.val();
+        if (!d || !d.timestamp) return;
+        const tMs = d.timestamp * 1000;
+        if (tMs < cutoffMs) return;
+
+        points.push({
+          timeMs: tMs,
+          co2: d.co2,
+          temp: d.temp,
+          hum: d.hum
+        });
+      });
+
+      pending--;
+      if (pending === 0) {
+        renderHistory(points);
+      }
+    });
+  });
+}
+
+function renderHistory(points) {
+  if (!points.length) {
+    if (historyChart) {
+      historyChart.destroy();
+      historyChart = null;
+    }
+    const ctx = document.getElementById("historyChart").getContext("2d");
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    return;
   }
-});
 
-// Reaaliaikainen kuuntelu
-db.ref("sensor").limitToLast(200).on("child_added", (snapshot) => {
-  const d = snapshot.val();
-  if (!d) return;
+  // Järjestetään ajan mukaan
+  points.sort((a, b) => a.timeMs - b.timeMs);
 
-  document.getElementById("co2Box").innerHTML = "CO₂: " + d.co2 + " ppm";
-  document.getElementById("tempBox").innerHTML = "Lämpötila: " + d.temp + " °C";
-  document.getElementById("humBox").innerHTML = "Kosteus: " + d.hum + " %";
+  const labels = points.map(p =>
+    new Date(p.timeMs).toLocaleTimeString("fi-FI", { hour: "2-digit", minute: "2-digit" })
+  );
+  const co2Vals = points.map(p => p.co2);
+  const tempVals = points.map(p => p.temp);
+  const humVals = points.map(p => p.hum);
 
-  labels.push("");
-  dataCO2.push(d.co2);
+  const ctx = document.getElementById("historyChart").getContext("2d");
 
-  if (dataCO2.length > 200) {
-    labels.shift();
-    dataCO2.shift();
+  if (historyChart) {
+    historyChart.destroy();
   }
 
-  chart.update();
-});
+  historyChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: "CO₂ (ppm)",
+          data: co2Vals,
+          borderWidth: 2,
+          fill: false
+        },
+        {
+          label: "Lämpötila (°C)",
+          data: tempVals,
+          borderWidth: 1,
+          fill: false
+        },
+        {
+          label: "Kosteus (%)",
+          data: humVals,
+          borderWidth: 1,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { display: true },
+        y: { beginAtZero: false }
+      }
+    }
+  });
+}
 
-// Rekisteröi service worker
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('Service worker ok', reg.scope))
-      .catch(err => console.log('Service worker error', err));
+// Service worker (PWA)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js")
+      .catch(err => console.log("SW error", err));
   });
 }
 </script>
 
 </body>
 </html>
-
